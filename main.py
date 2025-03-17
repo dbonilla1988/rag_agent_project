@@ -1,11 +1,18 @@
 import os
+import tkinter as tk
+from tkinter import scrolledtext
+
+# Import your RAG logic (google_search, youtube_search, parse, etc.)
 import requests
 import openai
 from dotenv import load_dotenv
 
-# ---------- GOOGLE SEARCH ----------
+###############################
+# Example RAG Logic Functions #
+###############################
+
 def google_search(query):
-    """Uses the Google Custom Search API to find info on a given query."""
+    # Example only; adapt to your actual code
     url = "https://www.googleapis.com/customsearch/v1"
     params = {
         "key": os.getenv("GOOGLE_API_KEY"),
@@ -16,7 +23,6 @@ def google_search(query):
     return response.json()
 
 def parse_google_response(json_data):
-    """Extract title, snippet, and link from each search result item."""
     if "items" not in json_data:
         return []
     items = json_data["items"]
@@ -32,9 +38,7 @@ def parse_google_response(json_data):
         })
     return parsed_results
 
-# ---------- YOUTUBE SEARCH ----------
 def youtube_search(query):
-    """Uses the YouTube Data API to find trailer videos for a given query."""
     url = "https://www.googleapis.com/youtube/v3/search"
     params = {
         "key": os.getenv("YOUTUBE_API_KEY"),
@@ -47,7 +51,6 @@ def youtube_search(query):
     return response.json()
 
 def parse_youtube_response(json_data):
-    """Extract video title, channel, and URL from the YouTube search results."""
     items = json_data.get("items", [])
     videos = []
     for item in items:
@@ -60,34 +63,28 @@ def parse_youtube_response(json_data):
         })
     return videos
 
-# ---------- (UPDATED) OPENAI SUMMARIZATION WITH ChatCompletion ----------
 def summarize_results(google_res, youtube_res):
-    """
-    Sends a prompt to OpenAI ChatCompletion to summarize the combined Google + YouTube info.
-    You need OPENAI_API_KEY in your .env for this to work.
-    """
     openai.api_key = os.getenv("OPENAI_API_KEY")
 
-    # Build a text block describing what we found
     google_text = "\n".join([f"- {g['title']}: {g['snippet']}" for g in google_res])
     youtube_text = "\n".join([f"- {y['title']} (Channel: {y['channel']})" for y in youtube_res])
     
-    user_message = f"""
-I searched for movie/series info and got the following Google results:
-{google_text}
+    prompt = f"""
+    I searched for movie/series info and got the following Google results:
+    {google_text}
 
-And these YouTube trailers:
-{youtube_text}
+    And these YouTube trailers:
+    {youtube_text}
 
-Please provide a concise summary (3-5 sentences) of this movie/series based on this info.
-    """.strip()
+    Please provide a concise summary (3-5 sentences) based on this info.
+    """
 
     try:
         response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",  # or "gpt-4" if you have access
+            model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": user_message}
+                {"role": "user", "content": prompt.strip()}
             ],
             max_tokens=150,
             temperature=0.7
@@ -97,49 +94,80 @@ Please provide a concise summary (3-5 sentences) of this movie/series based on t
     except Exception as e:
         return f"Error calling OpenAI: {e}"
 
-# ---------- MAIN FUNCTION ----------
-def main():
-    load_dotenv()  # Load .env variables
 
-    # 1. Ask user for a movie/series name
-    search_query = input("Enter a movie or series name: ")
+######################
+# Tkinter GUI Section #
+######################
 
-    # 2. Google results (IMDB info, etc.)
-    google_json = google_search(f"{search_query} imdb")
-    google_results = parse_google_response(google_json)
+def run_query():
+    """Triggered by the 'Search' button. Fetch Google & YouTube, display results, optionally summarize."""
+    query = query_entry.get().strip()
+    if not query:
+        return
 
-    # 3. YouTube results (trailers)
-    youtube_json = youtube_search(f"{search_query} official trailer")
-    youtube_results = parse_youtube_response(youtube_json)
+    # Clear previous output
+    output_area.config(state=tk.NORMAL)
+    output_area.delete("1.0", tk.END)
 
-    # 4. Print results to console
-    print("\n======== Google Info ========")
+    # Perform Google Search
+    google_data = google_search(query + " imdb")  # e.g., "Inception imdb"
+    google_results = parse_google_response(google_data)
+
+    # Perform YouTube Search
+    youtube_data = youtube_search(query + " official trailer")
+    youtube_results = parse_youtube_response(youtube_data)
+
+    # Display Google Results
+    output_area.insert(tk.END, "======== Google Info ========\n")
     if google_results:
         for i, g in enumerate(google_results, start=1):
-            print(f"{i}. {g['title']}")
-            print(f"   {g['snippet']}")
-            print(f"   {g['link']}\n")
+            output_area.insert(tk.END, f"{i}. {g['title']}\n   {g['snippet']}\n   {g['link']}\n\n")
     else:
-        print("No Google results found.")
+        output_area.insert(tk.END, "No results found.\n\n")
 
-    print("======== YouTube Trailers ========")
+    # Display YouTube Results
+    output_area.insert(tk.END, "======== YouTube Trailers ========\n")
     if youtube_results:
         for i, vid in enumerate(youtube_results, start=1):
-            print(f"{i}. {vid['title']}")
-            print(f"   Channel: {vid['channel']}")
-            print(f"   Link: {vid['url']}\n")
+            output_area.insert(tk.END, f"{i}. {vid['title']}\n   Channel: {vid['channel']}\n   Link: {vid['url']}\n\n")
     else:
-        print("No YouTube results found.")
+        output_area.insert(tk.END, "No trailers found.\n\n")
 
-    # 5. (Optional) Summarize with ChatGPT if you have a valid OPENAI_API_KEY
-    openai_key = os.getenv("OPENAI_API_KEY")
-    if openai_key and "sk-" in openai_key:
-        print("======== OpenAI Summary ========")
+    # If OpenAI key is present, do a summary
+    openai_key = os.getenv("OPENAI_API_KEY", "")
+    if openai_key.startswith("sk-"):
         summary = summarize_results(google_results, youtube_results)
-        print(summary)
+        output_area.insert(tk.END, "======== OpenAI Summary ========\n")
+        output_area.insert(tk.END, f"{summary}\n\n")
     else:
-        print("======== OpenAI Summary ========")
-        print("No valid OPENAI_API_KEY found or it's not set up. Skipping summarization.")
+        output_area.insert(tk.END, "======== OpenAI Summary ========\n")
+        output_area.insert(tk.END, "No valid OPENAI_API_KEY, skipping summary.\n\n")
+
+    output_area.config(state=tk.DISABLED)
+
+def main():
+    load_dotenv()
+
+    # Initialize the tkinter window
+    root = tk.Tk()
+    root.title("RAG Agent")
+
+    # Label + text entry for user queries
+    tk.Label(root, text="Enter movie/series:").pack()
+    global query_entry
+    query_entry = tk.Entry(root, width=50)
+    query_entry.pack()
+
+    # Search button
+    tk.Button(root, text="Search", command=run_query).pack()
+
+    # Scrolled text area for displaying results
+    global output_area
+    output_area = scrolledtext.ScrolledText(root, width=80, height=20, state=tk.NORMAL)
+    output_area.pack()
+
+    # Main event loop
+    root.mainloop()
 
 if __name__ == "__main__":
     main()
